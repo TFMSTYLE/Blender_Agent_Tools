@@ -12,9 +12,15 @@ This is a prototype. It covers **Rock, Orbiter and Graph**. The other addons joi
 | `describe_addon` | One addon's actions and settings, with current values and allowed ranges |
 | `run_addon` | Applies settings, runs an action, or both |
 
-Settings and ranges are read from Blender at the moment of the call, so nothing about any addon is kept here. Nothing is installed in Blender, and the addons themselves do not change.
+Settings and ranges are read from Blender at the moment of the call. Nothing is installed in Blender, and the addons themselves do not change.
 
-`run_addon` checks everything first, and one bad value refuses the whole call. It only runs an addon's own actions. It leaves out anything that imports, exports, opens a file or goes online, and an action that clears or resets something needs `confirm=true`.
+`describe_addon` leaves out the addon's private state, marks which settings apply to the current choices, and adds a short guide. The guides in `guides.py` are the one part kept by hand, so check them when an addon changes.
+
+`run_addon` checks everything first, and one bad value refuses the whole call. It only runs an addon's own actions. It leaves out anything that imports, exports, opens a file or goes online, an action that clears or resets something needs `confirm=true`, and starting something already running is refused.
+
+`ok` only says the action ran. The reply also measures what changed: size, vertices, lowest point and keyframes, with a warning for a huge mesh or a run that changed nothing.
+
+These tools only run the addons. Use Blender's own MCP tools to delete or move objects, set keyframes, or change the frame.
 
 ## What you need
 

@@ -106,12 +106,27 @@ async def rock(session):
     ids = [a["id"] for a in d["actions"]]
     check("finds its actions", "rock.generate" in ids, ids)
     check("hides the updater", not [i for i in ids if "update" in i], ids)
+    names = [s["name"] for s in d["settings"]]
+    check("leaves section toggles out", not [n for n in names if n.startswith("show_")], names)
+    check("says what applies", all("applies" in s for s in d["settings"]), d["settings"][:2])
+    check("every action is described", all(a["description"] for a in d["actions"]), d["actions"])
+    check("comes with a guide", len(d.get("guide", [])) >= 3, d.get("guide"))
+    sections = raw("result = {'open': bpy.context.scene.rockgen_props.show_erosion_settings}")
+    check("reading the panel leaves sections closed", sections["open"] is False, sections)
     number = next(s for s in d["settings"] if s["type"] == "int")
     choice = next(s for s in d["settings"] if s["type"] == "enum" and len(s["options"]) > 1)
     print("   ", len(d["settings"]), "settings, using", number["name"], "and", choice["name"])
 
     r = await tool(session, "run_addon", addon="rock", action="rock.generate", settings={number["name"]: number["max"], choice["name"]: choice["options"][-1]})
     check("generates", r["ok"] and r["new_objects"] and r["new_objects"][0]["vertices"], r)
+    made = r["new_objects"][0]
+    print("    made", made)
+    truth = raw(f"o = bpy.data.objects[{made['name']!r}]\nresult = {{'size': [round(v, 3) for v in o.dimensions], 'vertices': len(o.data.vertices)}}")
+    check("the reply's numbers are true", made["size"] == truth["size"] and made["vertices"] == truth["vertices"], (made, truth))
+    r = await tool(session, "run_addon", addon="rock", action="rock.generate", settings={"scale_x": 1.5})
+    check("an update reports the change", r["ok"] and r["changed_objects"] and r["changed_objects"][0]["name"] == made["name"], r)
+    r = await tool(session, "run_addon", addon="rock", settings={"show_detail_settings": True})
+    check("refuses a section toggle", not r["ok"], r)
     count = raw("result = {'n': len(bpy.data.objects)}")["n"]
 
     for action in ("object.delete", "wm.quit_blender", "tfmstyle_update.blender_rock"):
@@ -140,6 +155,18 @@ async def rock(session):
     check("no objects made or lost", raw("result = {'n': len(bpy.data.objects)}")["n"] == count)
     r = await tool(session, "run_addon", addon="rock", action="rock.reset_settings", confirm=True)
     check("reset runs with confirm", r["ok"], r)
+    raw("bpy.ops.object.select_all(action='DESELECT'); result = {}")
+    # The boulder from the first agent trial, with the one change that blew it up.
+    heavy = {
+        "base_shape": "CUBE", "size": 6.0, "subdivisions": 4, "seed": 4242, "scale_x": 1.2, "scale_y": 0.95, "scale_z": 0.8, "chip_layers": 48, "chip_radius": 1.4,
+        "chip_normal_jitter": 0.45, "chip_bias_outward": 0.8, "chip_noise_freq": 0.75, "chip_noise_amp": 0.15, "edge_chip_strength": 0.6, "edge_chip_scale": 2.5,
+        "weathering_strength": 0.2, "weathering_freq": 1.0, "crack_density": 0.2, "crack_depth": 0.05, "micro_amp": 0.2, "micro_freq": 1.2, "micro_octaves": 4,
+        "adaptive_subdiv": True, "weld_dist": 0.0005,
+    }
+    r = await tool(session, "run_addon", addon="rock", action="rock.generate", settings=heavy)
+    print("    heavy rock", r["new_objects"][0]["vertices"], r.get("warnings"))
+    check("warns about a huge mesh", any("vertices" in w for w in r.get("warnings", [])), r)
+    await tool(session, "run_addon", addon="rock", action="rock.reset_settings", confirm=True)
 
 
 async def orbiter(session):
@@ -152,6 +179,13 @@ async def orbiter(session):
     time.sleep(1.5)
     second = raw(read)
     check("the view really turns", first["on"] and first["q"] != second["q"], (first, second))
+    r = await tool(session, "run_addon", addon="orbiter", action="view3d.orbiter")
+    check("refuses a second start", not r["ok"] and "already running" in r["refused"][0], r)
+    d = await tool(session, "describe_addon", addon="orbiter")
+    names = [s["name"] for s in d["settings"]]
+    check("keeps what the panel shows and drops the rest", "speed" in names and "is_running" in names and "is_fullscreen" not in names and "original_screen" not in names, names)
+    r = await tool(session, "run_addon", addon="orbiter", settings={"is_fullscreen": True})
+    check("refuses an internal setting", not r["ok"], r)
     r = await tool(session, "run_addon", addon="orbiter", settings={"is_running": False})
     check("stops with a setting", r["ok"], r)
     time.sleep(0.5)
@@ -161,6 +195,7 @@ async def orbiter(session):
     check("the view stops turning", not first["on"] and first["q"] == second["q"], (first, second))
     r = await tool(session, "run_addon", addon="orbiter", action="view3d.center_object")
     check("centers", r["ok"], r)
+    check("says nothing changed in the scene", any("no object or keyframe changed" in w for w in r.get("warnings", [])), r)
 
 
 GRAPH_SETUP = """
@@ -187,6 +222,16 @@ result = {{'keys': sum(len(c.keyframe_points) for c in curves)}}
 
 async def graph(session):
     print("graph")
+    d = await tool(session, "describe_addon", addon="graph")
+    configs = next(l for l in d["lists"] if l["name"] == "graph_configs")
+    check("shows Graph's settings on an empty scene", configs["count"] == 0 and [f for f in configs["fields"] if f["name"] == "preset" and f["options"]], configs)
+    names = [s["name"] for s in d["settings"]] + [f["name"] for f in configs["fields"]]
+    check("leaves Graph's internals out", "saved_points_json" not in names and "loc_id" not in names and "generated_frames" not in [l["name"] for l in d["lists"]], names)
+    check("the guide says how to start", any("graph.save_selected_points" in n for n in d.get("guide", [])), d.get("guide"))
+    r = await tool(session, "run_addon", addon="graph", action="graph.generate_curve")
+    print("    too early:", r["ok"], r["messages"], r.get("warnings"))
+    check("too early says why, with no debug text", not r["ok"] and any("two saved keyframes" in m for m in r["messages"]) and all(m.split(":")[0] in ("Info", "Warning", "Error") for m in r["messages"]), r)
+
     name = raw(GRAPH_SETUP)["name"]
     keys = GRAPH_KEYS.format(name=name)
     check("two keyframes to start", raw(keys)["keys"] == 2)
@@ -203,6 +248,11 @@ async def graph(session):
     count = raw(keys)["keys"]
     check("keyframes really appear", count > 2, count)
     print("    keyframes", count)
+    animated = next((row for row in r["changed_objects"] if row.get("keyframes")), None)
+    print("    reply", animated)
+    d = await tool(session, "describe_addon", addon="graph")
+    fields = {f["name"]: f for f in next(l for l in d["lists"] if l["name"] == "graph_configs")["fields"]}
+    check("marks the setting that applies", fields["bounce_amount"]["applies"] and not fields["bounce_count"]["applies"], (fields["bounce_amount"], fields["bounce_count"]))
     r = await tool(session, "run_addon", addon="graph", settings={"graph_configs[0].strength": 99.0})
     check("refuses out of range inside a list", not r["ok"], r)
     r = await tool(session, "run_addon", addon="graph", settings={"graph_configs[7].strength": 1.0})

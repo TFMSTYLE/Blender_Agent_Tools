@@ -11,6 +11,7 @@ from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 
 from . import bridge
+from .guides import GUIDES
 
 CODE = Path(__file__).with_name("inside.py").read_text(encoding="utf-8")
 
@@ -18,8 +19,10 @@ mcp = FastMCP(
     "tfmstyle-blender-agent-tools",
     instructions=(
         "Uses the TFMSTYLE addons in a running Blender. Start with list_addons, then "
-        "describe_addon before the first run_addon of an addon: its settings and ranges "
-        "are read from Blender and can differ between versions."
+        "describe_addon before the first run_addon of an addon, and follow its guide: "
+        "settings and ranges are read from Blender and can differ between versions. "
+        "These tools only run the addons. Use Blender's own tools to delete or move "
+        "objects, set keyframes, or change the frame."
     ),
 )
 
@@ -36,12 +39,19 @@ def list_addons() -> dict:
 
 @mcp.tool(annotations=ToolAnnotations(title="Describe a TFMSTYLE addon", readOnlyHint=True))
 def describe_addon(addon: str) -> dict:
-    """Show one addon's actions and settings, with current values and allowed ranges.
+    """Show one addon's actions and settings, with current values, ranges and a guide.
 
+    `applies` says whether a setting does anything for the current choices.
     Settings kept per item appear under `lists`, for example one set per saved graph.
     Set those with the name list[index].setting.
     """
-    return call("describe_addon", addon=addon)
+    reply = call("describe_addon", addon=addon)
+    guide = GUIDES.get(addon)
+    if guide and "actions" in reply:
+        for action in reply["actions"]:
+            action["description"] = action["description"] or guide["actions"].get(action["id"], "")
+        reply["guide"] = guide["notes"]
+    return reply
 
 
 @mcp.tool(annotations=ToolAnnotations(title="Run a TFMSTYLE addon", destructiveHint=True))
@@ -51,6 +61,10 @@ def run_addon(addon: str, action: str = "", settings: dict | None = None, confir
     Everything is checked first: one bad value refuses the whole call and changes
     nothing. An action that clears or resets something needs confirm=true.
     Settings stay as set, the same as if a person had moved the slider.
+
+    The reply measures what changed: size, vertices, lowest_z and keyframes under
+    new_objects and changed_objects. ok only says the action ran, so read those and
+    any warnings to judge the result.
     """
     return call("run_addon", addon=addon, action=action, settings=settings, confirm=confirm)
 
