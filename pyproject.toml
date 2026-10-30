@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tfmstyle-blender-agent-tools"
+version = "0.1.0"
+description = "One MCP toolbox that lets any agent use the TFMSTYLE Blender addons"
+requires-python = ">=3.10"
+license = "GPL-3.0-or-later"
+dependencies = ["mcp>=1.2.0,<2"]
+
+[project.scripts]
+tfmstyle-blender-agent-tools = "tfmstyle_agent_tools.server:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
