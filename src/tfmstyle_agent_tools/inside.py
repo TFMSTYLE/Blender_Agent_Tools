@@ -103,13 +103,17 @@ def actions_of(addon):
 
 
 def public_names(addon):
-    """Every setting its panels can ever show, or None when that cannot be read."""
+    """Every setting its panels can ever show. Empty when that cannot be read, and an
+    empty set locks every setting: an unreadable panel must never open private state."""
     try:
         source = Path(addon["module"].__file__).read_text(encoding="utf-8")
     except (OSError, TypeError):
-        return None
-    names = {n for n in PANEL_PROP.findall(source) if not SECTION.match(n)}
-    return names or None
+        return set()
+    return {n for n in PANEL_PROP.findall(source) if not SECTION.match(n)}
+
+
+def locked(addon):
+    return f"cannot read {addon}'s panel source, settings are locked"
 
 
 class Recorder:
@@ -145,8 +149,8 @@ def drawn_now(addon, groups):
 
 
 def settable(rna, public):
-    props = [p for p in rna.properties if p.identifier not in ("rna_type", "name") and p.type in SETTABLE and not p.is_readonly and not p.is_hidden]
-    return props if public is None else [p for p in props if p.identifier in public]
+    """Only what a panel draws. No public names means nothing is settable."""
+    return [p for p in rna.properties if p.identifier in public and p.identifier not in ("rna_type", "name") and p.type in SETTABLE and not p.is_readonly and not p.is_hidden]
 
 
 def lists_of(group):
@@ -306,7 +310,10 @@ def describe_addon(addon):
                 fields = [field(p, items[0], drawn) for p in shape] if len(items) else [field(p) for p in shape]
                 lists.append(dict(name=prop.identifier, label=prop.name, count=len(items), fields=fields, items=[{p.identifier: value_of(i, p) for p in shape} for i in items[:SHOWN_ITEMS]]))
     actions = [dict(id=i, label=c.bl_label, description=getattr(c, "bl_description", ""), needs_confirm=bool(CONFIRM.search(i))) for i, c in sorted(actions_of(info).items())]
-    return dict(addon=addon, name=info["name"], version=info["version"], installed_as=info["installed_as"], editor=space, actions=actions, settings=settings, lists=lists)
+    reply = dict(addon=addon, name=info["name"], version=info["version"], installed_as=info["installed_as"], editor=space, actions=actions, settings=settings, lists=lists)
+    if not public:
+        reply["settings_locked"] = locked(addon)
+    return reply
 
 
 def run_addon(addon, action="", settings=None, confirm=False):
@@ -318,7 +325,9 @@ def run_addon(addon, action="", settings=None, confirm=False):
     with bpy.context.temp_override(**window_for(space_of(info))):
         groups = groups_of(info)
         plan, refused = [], []
-        for key, value in (settings or {}).items():
+        if settings and not public:
+            refused.append(locked(addon))
+        for key, value in (settings or {}).items() if public else ():
             holder, prop = resolve(groups, key, public)
             why = "is not a setting of this addon" if prop is None else problem(holder, prop, value)
             if why:

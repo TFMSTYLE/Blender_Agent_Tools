@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **Addon settings**: when an addon's panel cannot be read, its settings are now locked rather than all left open, and its actions still run
+
 ## 0.2.0
 
 - describe_addon now leaves out private settings, marks which settings apply, shows Graph's settings on an empty scene, and adds a short guide per addon
